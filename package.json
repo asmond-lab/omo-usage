@@ -1,0 +1,20 @@
+{
+  "name": "omo-usage",
+  "version": "0.1.0",
+  "description": "Shows the active model's remaining usage in the OMO Native footer.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/asmond-lab/omo-usage.git"
+  },
+  "private": true,
+  "type": "module",
+  "pi": {
+    "extensions": [
+      "./index.js"
+    ]
+  },
+  "scripts": {
+    "test": "bun test tests"
+  }
+}
