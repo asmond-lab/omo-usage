@@ -24,7 +24,7 @@ omo install https://github.com/asmond-lab/omo-usage
 
 | OMO provider | 표시 내용 |
 |---|---|
-| `kiro` ([omo-kiro](https://github.com/asmond-lab/omo-kiro) 사용 시) | 이번 달 남은 크레딧 (예: `3,542 / 5,000`) |
+| `kiro` (`kiro` provider를 등록하는 확장을 쓸 때) | 이번 달 남은 크레딧 (예: `3,542 / 5,000`) |
 | `chatgpt-subscription` | 주간 한도 남은 양 (한도가 두 개면 더 빠듯한 쪽) |
 | `anthropic-subscription` | 5시간·7일 한도 중 더 빠듯한 쪽 |
 | `openrouter` | 키에 걸린 사용 한도 남은 금액 (한도가 있는 키만) |

@@ -24,7 +24,7 @@ Then start `omo` (or run `/reload` in an open session).
 
 | Provider in OMO | What it shows |
 |---|---|
-| `kiro` (with [omo-kiro](https://github.com/asmond-lab/omo-kiro)) | Credits left this month, e.g. `3,542 / 5,000` |
+| `kiro` (any extension that registers the `kiro` provider) | Credits left this month, e.g. `3,542 / 5,000` |
 | `chatgpt-subscription` | Weekly limit left (the tighter window if there are two) |
 | `anthropic-subscription` | The tighter of the 5-hour and 7-day limits |
 | `openrouter` | The key's spending limit left (only when the key has a limit) |
