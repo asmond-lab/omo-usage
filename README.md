@@ -45,7 +45,7 @@ not how much is left, so nothing is shown.
 
 - It uses the login OMO already has for that provider. No extra setup, and nothing is stored.
 - The bar gets its own line at the bottom, under OMO's footer, so a long session name or other statuses never push it off screen.
-- It refreshes 6 seconds after each model reply so Kiro has time to record usage; lookups start at least 10 seconds apart, with a 15-second cap during continuous replies.
+- It refreshes after every reply: about 5 seconds after, then once more 45 seconds later, because Kiro sometimes counts a reply late. Lookups start at least 10 seconds apart, a burst of replies updates within 15 seconds, and lookups stop when the session is idle.
 - The ChatGPT and Claude subscription numbers come from the same endpoints their official apps use.
   Those are not public APIs and may change; if one breaks, that provider just stops showing.
 - Tested live with Kiro, ChatGPT, OpenRouter and Vercel. The Claude subscription lookup follows

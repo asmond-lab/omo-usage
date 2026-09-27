@@ -3,15 +3,18 @@ import { truncateToWidth } from "@earendil-works/pi-tui";
 import { formatUsage, renderUsage } from "./src/format.js";
 import { USAGE_SOURCES } from "./src/providers.js";
 
-// Refresh after every model reply. Measured against Kiro: a reply shows up in the usage
-// count about 4-5s after it finishes, and a lookup takes ~0.2s and costs no credits.
-// - SETTLE_MS: wait this long after a reply so the lookup sees that reply, not the one before.
-// - MIN_INTERVAL_MS: never start two lookups closer together than this. A reply inside
-//   the gap is not dropped: one trailing lookup runs when the gap ends.
-export const SETTLE_MS = 6_000;
+// Refresh after every model reply. Measured against Kiro: the usage count sometimes
+// includes a reply 2-3s after it ends and sometimes only 40s+ later, and a lookup takes
+// ~0.2s and costs no credits. So look up soon after a reply, then again a little later
+// to catch a late count, without ever starting two lookups closer than MIN_INTERVAL_MS.
+// - SETTLE_MS: wait this long after a reply before the first lookup.
+// - FOLLOW_UP_MS: look again this long after that, in case the count landed late.
+// - MIN_INTERVAL_MS: minimum gap between lookups. A reply inside the gap is not dropped.
+// - MAX_WAIT_MS: during a long task replies keep arriving; do not postpone the lookup
+//   past this, measured from the first reply that is still waiting to be shown.
+export const SETTLE_MS = 5_000;
+export const FOLLOW_UP_MS = 45_000;
 export const MIN_INTERVAL_MS = 10_000;
-// - MAX_WAIT_MS: during a long task, replies keep arriving; do not keep postponing the
-//   lookup past this, measured from the first reply that is still waiting to be shown.
 export const MAX_WAIT_MS = 15_000;
 
 // OMO's footer puts every extension status on one shared line, where a long bar gets
@@ -49,6 +52,8 @@ export function createUsageFooter({ now = Date.now, setTimer = realTimer, clearT
     let timer;
     let scheduledAt = 0;
     let firstWaitingAt = 0;
+    let followTimer;
+    let followUp = false;
     let latestCtx;
 
     const show = (text) => {
@@ -59,6 +64,11 @@ export function createUsageFooter({ now = Date.now, setTimer = realTimer, clearT
     const cancelTimer = () => {
       if (timer !== undefined) clearTimer(timer);
       timer = undefined;
+    };
+    const cancelFollowUp = () => {
+      followUp = false;
+      if (followTimer !== undefined) clearTimer(followTimer);
+      followTimer = undefined;
     };
 
     async function lookUp(ctx) {
@@ -81,6 +91,17 @@ export function createUsageFooter({ now = Date.now, setTimer = realTimer, clearT
       show(snapshot ? renderUsage(formatUsage(snapshot)) : undefined);
       // A reply finished while this lookup was running: pick it up as well.
       if (pending) request(latestCtx);
+      else if (followUp) scheduleFollowUp();
+    }
+
+    // One extra lookup a while after a reply, for counts that arrive late.
+    function scheduleFollowUp() {
+      followUp = false;
+      if (followTimer !== undefined) clearTimer(followTimer);
+      followTimer = setTimer(() => {
+        followTimer = undefined;
+        if (timer === undefined && !inFlight) return lookUp(latestCtx);
+      }, FOLLOW_UP_MS);
     }
 
     function request(ctx, force = false) {
@@ -90,6 +111,7 @@ export function createUsageFooter({ now = Date.now, setTimer = realTimer, clearT
       if (!model || !USAGE_SOURCES[model.provider]) {
         modelKey = undefined;
         cancelTimer();
+        cancelFollowUp();
         pending = false;
         generation++;
         show(undefined);
@@ -100,6 +122,7 @@ export function createUsageFooter({ now = Date.now, setTimer = realTimer, clearT
         // Never show the previous model's numbers under a new model.
         modelKey = key;
         show(undefined);
+        cancelFollowUp();
         force = true;
       }
       if (force) {
@@ -110,6 +133,8 @@ export function createUsageFooter({ now = Date.now, setTimer = realTimer, clearT
         pending = true;
         return;
       }
+      // A reply ran: after its lookup, also look once more later for a late count.
+      followUp = true;
       // After a reply: give the provider time to record it, and respect the minimum gap.
       // Later replies push the lookup back so it includes them, up to MAX_WAIT_MS.
       if (timer === undefined) firstWaitingAt = now();
@@ -139,6 +164,7 @@ export function createUsageFooter({ now = Date.now, setTimer = realTimer, clearT
     pi.on("agent_end", (_event, ctx) => request(ctx));
     pi.on("session_shutdown", () => {
       cancelTimer();
+      cancelFollowUp();
       generation++;
       show(undefined);
     });

@@ -10,7 +10,7 @@ mock.module("@earendil-works/pi-tui", () => ({
   truncateToWidth: (text, width, ellipsis) => (text.replace(/\x1b\[[0-9;]*m/g, "").length > width ? text.slice(0, width - 1) + ellipsis : text),
 }));
 
-const { createUsageFooter, MIN_INTERVAL_MS, SETTLE_MS, MAX_WAIT_MS } = await import("../index.js");
+const { createUsageFooter, MIN_INTERVAL_MS, SETTLE_MS, MAX_WAIT_MS, FOLLOW_UP_MS } = await import("../index.js");
 const { USAGE_SOURCES } = await import("../src/providers.js");
 
 const strip = (s) => s.replace(/\x1b\[[0-9;]*m/g, "");
@@ -247,5 +247,41 @@ describe("refresh timing", () => {
     expect(h.pendingTimers()).toBe(0);
     expect(c.calls).toBe(1);
     expect(h.footerLines()).toEqual(["BUILT-IN FOOTER"]);
+  });
+
+  test("a count that lands late is picked up by one follow-up lookup", async () => {
+    const h = host();
+    h.ctx.model = { provider: "test-p", id: "m1" };
+    const c = counter(90);
+    await withSource("test-p", c.fn, async () => {
+      await h.fire("session_start");
+      await h.advance(MIN_INTERVAL_MS);
+      await h.fire("turn_end");
+      await h.advance(SETTLE_MS);
+      // The provider has not counted the reply yet.
+      expect(c.calls).toBe(2);
+      expect(strip(h.footerLines()[1])).toContain("90% 남음");
+      c.remaining = 80;
+      await h.advance(FOLLOW_UP_MS);
+    });
+    expect(c.calls).toBe(3);
+    expect(strip(h.footerLines()[1])).toContain("80% 남음");
+  });
+
+  test("an idle session stops looking up after the follow-up", async () => {
+    const h = host();
+    h.ctx.model = { provider: "test-p", id: "m1" };
+    const c = counter(90);
+    await withSource("test-p", c.fn, async () => {
+      await h.fire("session_start");
+      await h.advance(MIN_INTERVAL_MS);
+      await h.fire("turn_end");
+      await h.advance(SETTLE_MS);
+      await h.advance(FOLLOW_UP_MS);
+      const afterFollowUp = c.calls;
+      await h.advance(10 * 60_000);
+      expect(c.calls).toBe(afterFollowUp);
+    });
+    expect(h.pendingTimers()).toBe(0);
   });
 });
