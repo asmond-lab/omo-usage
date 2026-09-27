@@ -1,3 +1,5 @@
+<p align="center"><img src="https://raw.githubusercontent.com/asmond-lab/omo-usage/main/assets/banner.png" alt="omo-usage" width="100%"></p>
+
 # omo-usage
 
 [English](README.md) | **한국어**
