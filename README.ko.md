@@ -7,6 +7,7 @@
 지금 쓰는 모델의 **남은 사용량**을 OMO Native 하단 표시줄에 보여줍니다.
 모델을 바꾸면 따라 바뀌고, 사용량을 알 수 없는 모델에서는 표시하지 않습니다.
 
+![붐비는 하단 아래 별도 줄에 표시](https://raw.githubusercontent.com/asmond-lab/omo-usage/main/assets/own-line.png)
 ![Kiro, 넉넉함](https://raw.githubusercontent.com/asmond-lab/omo-usage/main/assets/kiro.png)
 ![ChatGPT 구독, 절반 정도 남음](https://raw.githubusercontent.com/asmond-lab/omo-usage/main/assets/chatgpt.png)
 ![거의 소진](https://raw.githubusercontent.com/asmond-lab/omo-usage/main/assets/low.png)
@@ -42,6 +43,7 @@ omo install https://github.com/asmond-lab/omo-usage
 ## 알아둘 점
 
 - OMO에 이미 로그인된 정보를 그대로 씁니다. 따로 설정할 것이 없고, 아무것도 저장하지 않습니다.
+- 막대는 OMO 하단 표시줄 아래 **맨 끝 별도 줄**에 나옵니다. 세션 이름이 길거나 다른 상태 표시가 많아도 잘리지 않습니다.
 - 세션 시작, 모델 변경, 답변이 끝날 때 새로 조회합니다(1분에 한 번까지).
 - ChatGPT·Claude 구독 수치는 공식 앱이 쓰는 주소에서 가져옵니다. 공개 API가 아니라 바뀔 수 있고, 바뀌면 해당 provider만 표시되지 않습니다.
 - Kiro·ChatGPT·OpenRouter·Vercel은 실제 계정으로 확인했습니다. Claude 구독은 다른 동작하는 클라이언트와 같은 방식으로 만들었지만, 실제 Claude 계정으로는 아직 확인하지 못했습니다.

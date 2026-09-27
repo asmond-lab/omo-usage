@@ -1,19 +1,38 @@
-import { describe, expect, test } from "bun:test";
-import usageFooter from "../index.js";
-import { USAGE_SOURCES } from "../src/providers.js";
+import { describe, expect, mock, test } from "bun:test";
 
-// A fake host that records the footer and lets a test fire the extension's events.
+// The extension imports OMO's footer class and width helper from the host. Stand in
+// minimal versions so the real render wrapper can be exercised without a terminal.
+class FakeFooter {
+  render() { return ["BUILT-IN FOOTER"]; }
+}
+mock.module("@code-yeongyu/senpi", () => ({ FooterComponent: FakeFooter }));
+mock.module("@earendil-works/pi-tui", () => ({
+  truncateToWidth: (text, width, ellipsis) => (text.replace(/\x1b\[[0-9;]*m/g, "").length > width ? text.slice(0, width - 1) + ellipsis : text),
+}));
+
+const { default: usageFooter } = await import("../index.js");
+const { USAGE_SOURCES } = await import("../src/providers.js");
+
+const strip = (s) => s.replace(/\x1b\[[0-9;]*m/g, "");
+
+// A fake host that fires the extension's events and records repaint requests.
 function host() {
   const handlers = {};
-  const status = new Map();
+  let repaints = 0;
   const ctx = {
     hasUI: true,
     model: undefined,
-    ui: { theme: { fg: (color, text) => `<${color}>${text}` }, setStatus: (k, v) => (v === undefined ? status.delete(k) : status.set(k, v)) },
+    ui: { setStatus: () => repaints++ },
     modelRegistry: { getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "test-key" }) },
   };
   usageFooter({ on: (name, fn) => (handlers[name] = fn) });
-  return { ctx, status, fire: (name) => handlers[name]({}, ctx) };
+  const footer = new FakeFooter();
+  return {
+    ctx,
+    fire: (name) => handlers[name]({}, ctx),
+    footerLines: (width = 200) => footer.render(width),
+    repaints: () => repaints,
+  };
 }
 
 function withSource(provider, fn, run) {
@@ -22,33 +41,44 @@ function withSource(provider, fn, run) {
   return run().finally(() => { if (original) USAGE_SOURCES[provider] = original; else delete USAGE_SOURCES[provider]; });
 }
 
-describe("follows the currently selected model", () => {
-  test("shows the active model's remaining usage in the footer", async () => {
+describe("usage gets its own line under the built-in footer", () => {
+  test("the built-in footer is kept and the usage line is appended after it", async () => {
     const h = host();
     h.ctx.model = { provider: "test-p", id: "m1" };
     await withSource("test-p", async () => ({ label: "Test", remaining: 30, total: 100, unit: "percent" }), () => h.fire("session_start"));
-    const shown = [...h.status.values()];
-    expect(shown).toHaveLength(1);
-    expect(shown[0].replace(/\x1b\[[0-9;]*m/g, "")).toBe("Test ▕████░░░░░░░░░░▏ 30% 남음");
+    const lines = h.footerLines();
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toBe("BUILT-IN FOOTER");
+    expect(strip(lines[1])).toBe("Test ▕████░░░░░░░░░░▏ 30% 남음");
+    expect(h.repaints()).toBeGreaterThan(0);
   });
 
-  test("switching to a model with no usage source hides it", async () => {
+  test("nothing is added when the model has no usage source", async () => {
     const h = host();
     h.ctx.model = { provider: "test-p", id: "m1" };
     await withSource("test-p", async () => ({ label: "Test", remaining: 80, total: 100, unit: "percent" }), async () => {
       await h.fire("session_start");
-      expect(h.status.size).toBe(1);
+      expect(h.footerLines()).toHaveLength(2);
       h.ctx.model = { provider: "no-such-provider", id: "x" };
       await h.fire("model_select");
     });
-    expect(h.status.size).toBe(0);
+    expect(h.footerLines()).toEqual(["BUILT-IN FOOTER"]);
   });
 
-  test("a failed lookup hides the bar instead of showing stale or wrong numbers", async () => {
+  test("a narrow terminal cuts the line instead of wrapping it", async () => {
+    const h = host();
+    h.ctx.model = { provider: "test-p", id: "m1" };
+    await withSource("test-p", async () => ({ label: "Test", remaining: 3000, total: 5000, unit: "count" }), () => h.fire("session_start"));
+    const narrow = strip(h.footerLines(20)[1]);
+    expect(narrow.length).toBeLessThanOrEqual(20);
+    expect(narrow.endsWith("…")).toBe(true);
+  });
+
+  test("a failed lookup adds no line rather than stale or wrong numbers", async () => {
     const h = host();
     h.ctx.model = { provider: "test-p", id: "m1" };
     await withSource("test-p", async () => { throw new Error("network down"); }, () => h.fire("session_start"));
-    expect(h.status.size).toBe(0);
+    expect(h.footerLines()).toEqual(["BUILT-IN FOOTER"]);
   });
 
   test("a slow lookup for the old model cannot overwrite the new model", async () => {
@@ -64,7 +94,7 @@ describe("follows the currently selected model", () => {
         releaseOld();
         await pendingOld;
       }));
-    const shown = [...h.status.values()].join("");
+    const shown = strip(h.footerLines().join("\n"));
     expect(shown).toContain("New");
     expect(shown).not.toContain("Old");
   });
@@ -88,6 +118,5 @@ describe("follows the currently selected model", () => {
     let calls = 0;
     await withSource("test-p", async () => { calls++; return { label: "T", remaining: 60, total: 100, unit: "percent" }; }, () => h.fire("session_start"));
     expect(calls).toBe(0);
-    expect(h.status.size).toBe(0);
   });
 });

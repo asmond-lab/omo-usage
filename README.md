@@ -7,6 +7,7 @@
 Shows how much usage is **left** for the model you are using, right in the OMO Native footer.
 Switch models and it follows; models with no usage data are simply not shown.
 
+![Usage on its own line under a busy footer](https://raw.githubusercontent.com/asmond-lab/omo-usage/main/assets/own-line.png)
 ![Kiro, plenty left](https://raw.githubusercontent.com/asmond-lab/omo-usage/main/assets/kiro.png)
 ![ChatGPT subscription, about half left](https://raw.githubusercontent.com/asmond-lab/omo-usage/main/assets/chatgpt.png)
 ![Running low](https://raw.githubusercontent.com/asmond-lab/omo-usage/main/assets/low.png)
@@ -43,6 +44,7 @@ not how much is left, so nothing is shown.
 ## Good to know
 
 - It uses the login OMO already has for that provider. No extra setup, and nothing is stored.
+- The bar gets its own line at the bottom, under OMO's footer, so a long session name or other statuses never push it off screen.
 - It refreshes when a session starts, when you switch models, and after replies (at most once a minute).
 - The ChatGPT and Claude subscription numbers come from the same endpoints their official apps use.
   Those are not public APIs and may change; if one breaks, that provider just stops showing.
