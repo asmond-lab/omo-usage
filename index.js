@@ -3,8 +3,16 @@ import { truncateToWidth } from "@earendil-works/pi-tui";
 import { formatUsage, renderUsage } from "./src/format.js";
 import { USAGE_SOURCES } from "./src/providers.js";
 
-// Usage endpoints are rate limited and slow-moving; refresh at most this often.
-const MIN_REFRESH_MS = 60_000;
+// Refresh after every model reply. Measured against Kiro: a reply shows up in the usage
+// count about 4-5s after it finishes, and a lookup takes ~0.2s and costs no credits.
+// - SETTLE_MS: wait this long after a reply so the lookup sees that reply, not the one before.
+// - MIN_INTERVAL_MS: never start two lookups closer together than this. A reply inside
+//   the gap is not dropped: one trailing lookup runs when the gap ends.
+export const SETTLE_MS = 6_000;
+export const MIN_INTERVAL_MS = 10_000;
+// - MAX_WAIT_MS: during a long task, replies keep arriving; do not keep postponing the
+//   lookup past this, measured from the first reply that is still waiting to be shown.
+export const MAX_WAIT_MS = 15_000;
 
 // OMO's footer puts every extension status on one shared line, where a long bar gets
 // cut off. Instead, append our own line under the built-in footer: OMO still draws its
@@ -24,60 +32,117 @@ function appendFooterLine() {
   };
 }
 
-export default function usageFooter(pi) {
-  let generation = 0;
-  let lastModelKey;
-  let lastFetchedAt = 0;
+function realTimer(fn, ms) {
+  const handle = setTimeout(fn, ms);
+  handle.unref?.();
+  return handle;
+}
 
-  const show = (text) => {
-    if (text === usageText) return;
-    usageText = text;
-    redraw();
-  };
+/** The clock and timer are injectable so the refresh schedule can be tested exactly. */
+export function createUsageFooter({ now = Date.now, setTimer = realTimer, clearTimer = clearTimeout } = {}) {
+  return function usageFooter(pi) {
+    let generation = 0;
+    let modelKey;
+    let lastStartedAt = -Infinity;
+    let inFlight = 0;
+    let pending = false;
+    let timer;
+    let scheduledAt = 0;
+    let firstWaitingAt = 0;
+    let latestCtx;
 
-  async function refresh(ctx, force) {
-    if (!ctx.hasUI) return;
-    const model = ctx.model;
-    const lookup = model && USAGE_SOURCES[model.provider];
-    if (!lookup) {
-      lastModelKey = undefined;
+    const show = (text) => {
+      if (text === usageText) return;
+      usageText = text;
+      redraw();
+    };
+    const cancelTimer = () => {
+      if (timer !== undefined) clearTimer(timer);
+      timer = undefined;
+    };
+
+    async function lookUp(ctx) {
+      const model = ctx.model;
+      const lookup = model && USAGE_SOURCES[model.provider];
+      const mine = ++generation;
+      inFlight = mine;
+      pending = false;
+      lastStartedAt = now();
+      let snapshot;
+      try {
+        const auth = lookup ? await ctx.modelRegistry.getApiKeyAndHeaders(model) : undefined;
+        snapshot = auth?.ok && auth.apiKey ? await lookup(auth.apiKey, model) : undefined;
+      } catch {
+        snapshot = undefined;
+      }
+      if (inFlight === mine) inFlight = 0;
+      // A slower lookup for an earlier model must not overwrite a newer one.
+      if (mine !== generation) return;
+      show(snapshot ? renderUsage(formatUsage(snapshot)) : undefined);
+      // A reply finished while this lookup was running: pick it up as well.
+      if (pending) request(latestCtx);
+    }
+
+    function request(ctx, force = false) {
+      if (!ctx.hasUI) return;
+      latestCtx = ctx;
+      const model = ctx.model;
+      if (!model || !USAGE_SOURCES[model.provider]) {
+        modelKey = undefined;
+        cancelTimer();
+        pending = false;
+        generation++;
+        show(undefined);
+        return;
+      }
+      const key = `${model.provider}/${model.id}`;
+      if (key !== modelKey) {
+        // Never show the previous model's numbers under a new model.
+        modelKey = key;
+        show(undefined);
+        force = true;
+      }
+      if (force) {
+        cancelTimer();
+        return lookUp(ctx);
+      }
+      if (inFlight) {
+        pending = true;
+        return;
+      }
+      // After a reply: give the provider time to record it, and respect the minimum gap.
+      // Later replies push the lookup back so it includes them, up to MAX_WAIT_MS.
+      if (timer === undefined) firstWaitingAt = now();
+      const wanted = Math.max(now() + SETTLE_MS, lastStartedAt + MIN_INTERVAL_MS);
+      const at = Math.max(Math.min(wanted, firstWaitingAt + MAX_WAIT_MS), lastStartedAt + MIN_INTERVAL_MS);
+      if (timer === undefined || at > scheduledAt) {
+        cancelTimer();
+        scheduledAt = at;
+        timer = setTimer(() => {
+          timer = undefined;
+          return lookUp(latestCtx);
+        }, Math.max(0, at - now()));
+      }
+    }
+
+    pi.on("session_start", (_event, ctx) => {
+      if (ctx.hasUI) {
+        appendFooterLine();
+        // Clearing an unused status key is the extension API's way to ask for a repaint.
+        redraw = () => ctx.ui.setStatus("zz-usage-left", undefined);
+      }
+      return request(ctx, true);
+    });
+    pi.on("model_select", (_event, ctx) => request(ctx, true));
+    // Every model reply, including each step of a long tool-using task.
+    pi.on("turn_end", (_event, ctx) => request(ctx));
+    pi.on("agent_end", (_event, ctx) => request(ctx));
+    pi.on("session_shutdown", () => {
+      cancelTimer();
+      generation++;
       show(undefined);
-      return;
-    }
-    const modelKey = `${model.provider}/${model.id}`;
-    const modelChanged = modelKey !== lastModelKey;
-    if (!force && !modelChanged && Date.now() - lastFetchedAt < MIN_REFRESH_MS) return;
-    // Never show the previous model's numbers under a new model.
-    if (modelChanged) show(undefined);
-    lastModelKey = modelKey;
-    lastFetchedAt = Date.now();
-    const mine = ++generation;
-    let snapshot;
-    try {
-      const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
-      snapshot = auth.ok && auth.apiKey ? await lookup(auth.apiKey, model) : undefined;
-    } catch {
-      snapshot = undefined;
-    }
-    // A slower lookup for an earlier model must not overwrite a newer one.
-    if (mine !== generation) return;
-    show(snapshot ? renderUsage(formatUsage(snapshot)) : undefined);
-  }
-
-  pi.on("session_start", (_event, ctx) => {
-    if (ctx.hasUI) {
-      appendFooterLine();
-      // Clearing an unused status key is the extension API's way to ask for a repaint.
-      redraw = () => ctx.ui.setStatus("zz-usage-left", undefined);
-    }
-    return refresh(ctx, true);
-  });
-  pi.on("model_select", (_event, ctx) => refresh(ctx, true));
-  pi.on("agent_end", (_event, ctx) => refresh(ctx, false));
-  pi.on("session_shutdown", () => show(undefined));
+    });
+  };
 }
 
-/** Test hook: the line appended under the footer, or undefined when hidden. */
-export function currentUsageLine() {
-  return usageText;
-}
+export default createUsageFooter();
